@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# S/R Headless Screener
 
-## Getting Started
+Screener saham IDX tanpa UI. Script berjalan pra-market, membaca watchlist saham, menghitung area support/resistance dan indikator teknikal, lalu mengirim shortlist sinyal ke Telegram dan email.
 
-First, run the development server:
+Spesifikasi lengkap ada di `docs/SPEC-sr-headless-screener.md`.
+
+Alur saat ini terdiri dari dua tahap:
+
+1. Weekly watchlist builder membaca universe lokal di `src/universe/idx.json`, menyaring saham berdasarkan likuiditas, struktur teknikal, support, dan volatilitas, lalu menghasilkan `data/watchlist.generated.json`.
+2. Daily screener membaca generated watchlist tersebut, lalu menerapkan strategi S/R harian untuk mencari sinyal entry.
+
+Catatan perilaku:
+
+- Harga dari provider sudah disesuaikan (adjusted) terhadap split/dividen agar level S/R dan RSI tidak palsu.
+- Daily screener menolak saham yang jatuh jauh di bawah SMA50 (anti-waterfall) dan butuh konfirmasi reversal sebelum memberi sinyal (`config.daily`).
+- Sinyal yang sama tidak dikirim ulang dalam masa cooldown (`config.daily.cooldownDays`); state disimpan di `data/signal-state.json`.
+- Ticker yang tidak diperdagangkan pada sesi pasar terakhir (suspend/halt/data tertinggal) dilewati; tiap run dicatat ke `data/run-log.jsonl`.
+- Backtest mereplikasi pipeline live (weekly funnel as-of tanggal lalu daily signal) dengan eksekusi sadar-gap dan biaya (`config.backtest.costPct`).
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Isi `.env`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+RESEND_API_KEY=
+MAIL_FROM="Screener <screener@example.com>"
+MAIL_TO="you@example.com"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Commands
 
-## Learn More
+```bash
+npm run dev       # jalankan screener lokal
+npm run weekly    # bangun watchlist mingguan dari universe lokal
+npm run weekly:ensure # bangun watchlist hanya jika belum ada/kedaluwarsa
+npm run backtest  # replay aturan ke histori watchlist
+npm run build     # compile TypeScript ke dist/
+npm start         # jalankan dist/index.js
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+GitHub Actions menjalankan `.github/workflows/screener.yml`:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Senin lebih awal untuk refresh weekly watchlist.
+- Weekday pra-market untuk menjalankan daily screener dan mengirim notifikasi.
 
-## Deploy on Vercel
+Simpan secret Telegram dan Resend di GitHub Actions secrets sebelum mengaktifkan workflow.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Data Yahoo Finance bersifat tidak resmi dan delay. Hasil screener bukan nasihat keuangan; selalu verifikasi harga live di broker.
