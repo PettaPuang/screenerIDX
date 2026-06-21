@@ -10,10 +10,10 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
       - run: npm ci
       - run: npm run build
@@ -21,20 +21,20 @@ jobs:
         run: echo "WATCHLIST_WEEK=$(date -u +'%G-%V')" >> "$GITHUB_ENV"
       - name: Restore weekly watchlist
         id: watchlist-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: data/watchlist.generated.json
           key: watchlist-${{ env.WATCHLIST_WEEK }}
       - run: npm run weekly:ensure
       - name: Save weekly watchlist
         if: steps.watchlist-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: data/watchlist.generated.json
           key: watchlist-${{ env.WATCHLIST_WEEK }}
       - name: Restore signal state (cooldown)
         if: github.event.schedule != '30 0 * * 1'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: data/signal-state.json
           key: signal-state-${{ github.run_id }}
@@ -50,7 +50,7 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
       - name: Save signal state (cooldown)
         if: github.event.schedule != '30 0 * * 1'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: data/signal-state.json
           key: signal-state-${{ github.run_id }}

@@ -5,7 +5,7 @@ import { CONFIG as C } from "./config.js";
 import { fetchDaily } from "./providers/yahoo.js";
 import { evaluate } from "./rules/evaluate.js";
 import { notifyAll } from "./notify/index.js";
-import { buildHtml, buildText } from "./report/format.js";
+import { buildHtml, buildText, buildWeeklyHtml, buildWeeklyText } from "./report/format.js";
 import { loadDailyWatchlist } from "./watchlist/load.js";
 import {
   isOnCooldown,
@@ -177,7 +177,10 @@ async function main(): Promise<void> {
   const warn = notes.join("\n");
   const subject = `Screener IDX - ${top.length} sinyal`;
 
-  await notifyAll(buildText(top, warn), buildHtml(top, warn), subject);
+  const text = `${buildWeeklyText(watchlist.candidates)}\n\n${buildText(top, warn)}`;
+  const html = `${buildWeeklyHtml(watchlist.candidates)}${buildHtml(top, warn)}`;
+
+  await notifyAll(text, html, subject);
 
   const today = new Date().toISOString();
   for (const signal of top) {

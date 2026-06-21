@@ -267,6 +267,7 @@ export function evaluateWithReasons(
       triggers,
       cmf,
       volRatio,
+      pivots: pD,
     },
   };
 }

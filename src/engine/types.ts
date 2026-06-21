@@ -38,6 +38,7 @@ export interface Signal {
   triggers: string[];
   cmf: number;
   volRatio: number;
+  pivots: Pivots | null;
 }
 
 export interface WeeklyCandidate {
@@ -51,5 +52,7 @@ export interface WeeklyCandidate {
   nearestSupport: number;
   distanceToSupportPct: number;
   confluence: number;
+  swingSupports: number[];
+  swingResistances: number[];
   reasons: string[];
 }

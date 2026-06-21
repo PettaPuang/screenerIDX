@@ -99,6 +99,17 @@ export function evaluateWeeklyCandidate(
   const nearestSupport = Math.max(...supports);
   const distanceToSupportPct = ((price - nearestSupport) / price) * 100;
 
+  const swingSupports = zones
+    .filter((zone) => zone.price < price)
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 3)
+    .map((zone) => zone.price);
+  const swingResistances = zones
+    .filter((zone) => zone.price > price)
+    .sort((a, b) => a.price - b.price)
+    .slice(0, 3)
+    .map((zone) => zone.price);
+
   if (distanceToSupportPct > C.weekly.nearSupportPct) {
     return { ticker, candidate: null, rejectReason: "too_far_from_support" };
   }
@@ -131,6 +142,8 @@ export function evaluateWeeklyCandidate(
       nearestSupport,
       distanceToSupportPct,
       confluence,
+      swingSupports,
+      swingResistances,
       reasons: [
         `ADV20 ${adv20.toFixed(0)}`,
         `jarak support ${distanceToSupportPct.toFixed(1)}%`,
