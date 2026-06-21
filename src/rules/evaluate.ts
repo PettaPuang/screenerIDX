@@ -1,6 +1,11 @@
 import { CONFIG as C } from "../config.js";
 import { bullishDivergence } from "../engine/divergence.js";
-import { rsiSeries, sma } from "../engine/indicators.js";
+import {
+  chaikinMoneyFlow,
+  rsiSeries,
+  sma,
+  volumeRatio,
+} from "../engine/indicators.js";
 import { classicPivots } from "../engine/pivots.js";
 import { resample } from "../engine/resample.js";
 import { clusterLevels, detectSwings } from "../engine/swings.js";
@@ -30,6 +35,10 @@ export type DailyRejectReason =
   | "liquidity"
   | "support_distance"
   | "rsi"
+  | "not_uptrend"
+  | "no_pullback_trigger"
+  | "divergence_required"
+  | "distribution"
   | "trend_waterfall"
   | "reversal_unconfirmed"
   | "rr";
@@ -101,25 +110,88 @@ export function evaluateWithReasons(
 
   const nearestSupport = Math.max(...supports);
   const nearestResistance = Math.min(...resistances);
+  const divergence = bullishDivergence(closes, rsiArr, C.divWindow);
+  const cmf = chaikinMoneyFlow(candles, C.flow.cmfPeriod) ?? 0;
+  const volRatio =
+    volumeRatio(
+      candles.map((candle) => candle.volume),
+      C.flow.volLookback,
+    ) ?? 1;
 
   if (adv < C.minAdvIdr) {
     return { ticker, signal: null, rejectReason: "liquidity" };
   }
 
   const distSup = ((price - nearestSupport) / price) * 100;
+  const triggers: string[] = [];
 
-  if (distSup > C.nearSupportPct) {
-    return { ticker, signal: null, rejectReason: "support_distance" };
-  }
+  if (C.strategy.mode === "reversal") {
+    // Mean reversion: harus benar-benar di support dan oversold dalam.
+    if (distSup > C.nearSupportPct) {
+      return { ticker, signal: null, rejectReason: "support_distance" };
+    }
 
-  if (rsi > C.rsiOversold) {
-    return { ticker, signal: null, rejectReason: "rsi" };
+    if (rsi > C.rsiOversold) {
+      return { ticker, signal: null, rejectReason: "rsi" };
+    }
+
+    if (C.strategy.reversalRequireDivergence && !divergence) {
+      return { ticker, signal: null, rejectReason: "divergence_required" };
+    }
+
+    triggers.push("oversold");
+  } else {
+    // Pullback in uptrend: konteks tren naik + minimal satu pemicu pullback.
+    if (C.strategy.requireAboveSma50 && (s50 == null || price < s50)) {
+      return { ticker, signal: null, rejectReason: "not_uptrend" };
+    }
+
+    const enabled = C.strategy.triggers;
+
+    if (enabled.rsi && rsi <= C.strategy.rsiPullbackMax) {
+      triggers.push("rsi");
+    }
+
+    if (enabled.pullbackPct) {
+      const lookback = candles.slice(-C.strategy.pullbackLookback);
+      const recentHigh = Math.max(...lookback.map((candle) => candle.high));
+      const pullback = ((recentHigh - price) / recentHigh) * 100;
+
+      if (
+        pullback >= C.strategy.pullbackMinPct &&
+        pullback <= C.strategy.pullbackMaxPct
+      ) {
+        triggers.push("pullbackPct");
+      }
+    }
+
+    if (enabled.sma20Tag && s20 != null) {
+      const sma20Prev = sma(closes.slice(0, -1), 20);
+      const band = C.strategy.sma20BandPct / 100;
+      const withinBand = price <= s20 * (1 + band) && price >= s20 * (1 - band);
+      const rising =
+        !C.strategy.sma20RequireRising ||
+        (sma20Prev != null && s20 > sma20Prev);
+
+      if (withinBand && rising) {
+        triggers.push("sma20Tag");
+      }
+    }
+
+    if (!triggers.length) {
+      return { ticker, signal: null, rejectReason: "no_pullback_trigger" };
+    }
   }
 
   // Anti-waterfall: tolak saham yang sudah jatuh jauh di bawah SMA50.
   // "Dekat support" saat downtrend tajam adalah jebakan pisau jatuh.
   if (s50 != null && price < s50 * (1 - C.daily.maxBelowSma50Pct / 100)) {
     return { ticker, signal: null, rejectReason: "trend_waterfall" };
+  }
+
+  // Proksi distribusi: tolak bila tekanan jual (CMF) jelas negatif.
+  if (C.flow.enabled && cmf < C.flow.minCmf) {
+    return { ticker, signal: null, rejectReason: "distribution" };
   }
 
   // Konfirmasi reversal: butuh tanda stabilisasi (candle hijau, RSI berbalik
@@ -148,7 +220,6 @@ export function evaluateWithReasons(
     return { ticker, signal: null, rejectReason: "rr" };
   }
 
-  const divergence = bullishDivergence(closes, rsiArr, C.divWindow);
   const confluence = supports.filter(
     (support) => Math.abs(support - nearestSupport) / nearestSupport <= 0.01,
   ).length;
@@ -162,12 +233,16 @@ export function evaluateWithReasons(
         ? "Bearish"
         : "Transisi";
 
+  const oversoldRef =
+    C.strategy.mode === "reversal" ? C.rsiOversold : C.strategy.rsiPullbackMax;
+  const oversoldDepth = Math.max(0, oversoldRef - rsi);
   const score =
     C.weights.rr * rr +
     C.weights.divergence * (divergence ? 1 : 0) +
     C.weights.confluence * confluence +
-    C.weights.oversold * (C.rsiOversold - rsi) +
-    C.weights.liquidity * adv;
+    C.weights.oversold * oversoldDepth +
+    C.weights.liquidity * adv +
+    C.weights.flow * cmf;
 
   return {
     ticker,
@@ -189,6 +264,9 @@ export function evaluateWithReasons(
       nearestSupport,
       nearestResistance,
       biasHTF,
+      triggers,
+      cmf,
+      volRatio,
     },
   };
 }

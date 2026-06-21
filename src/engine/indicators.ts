@@ -76,6 +76,58 @@ export function stochastic(
   return high === low ? 50 : ((last.close - low) / (high - low)) * 100;
 }
 
+/**
+ * Chaikin Money Flow: proksi tekanan beli/jual dari OHLCV. Tiap bar dibobot
+ * posisi close dalam range (dekat high = serapan) dikali volume. Hasil di
+ * rentang -1..+1; positif menandakan akumulasi, negatif distribusi.
+ */
+export function chaikinMoneyFlow(
+  candles: Array<{ high: number; low: number; close: number; volume: number }>,
+  period = 20,
+): number | null {
+  if (candles.length < period) {
+    return null;
+  }
+
+  const slice = candles.slice(-period);
+  let mfvSum = 0;
+  let volumeSum = 0;
+
+  for (const candle of slice) {
+    const range = candle.high - candle.low;
+    const multiplier =
+      range === 0
+        ? 0
+        : (candle.close - candle.low - (candle.high - candle.close)) / range;
+    mfvSum += multiplier * candle.volume;
+    volumeSum += candle.volume;
+  }
+
+  return volumeSum === 0 ? 0 : mfvSum / volumeSum;
+}
+
+/** Rasio volume bar terakhir terhadap rata-rata `period` bar sebelumnya. */
+export function volumeRatio(volumes: number[], period = 20): number | null {
+  if (volumes.length < period + 1) {
+    return null;
+  }
+
+  const prior = volumes.slice(-period - 1, -1);
+
+  if (prior.length < period) {
+    return null;
+  }
+
+  const avg = prior.reduce((sum, value) => sum + value, 0) / prior.length;
+  const last = volumes.at(-1);
+
+  if (last == null || avg <= 0) {
+    return null;
+  }
+
+  return last / avg;
+}
+
 export function atrPct(
   candles: Array<{ high: number; low: number; close: number }>,
   period = 14,

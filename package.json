@@ -8,6 +8,8 @@
     "weekly": "tsx src/watchlist/build-weekly.ts",
     "weekly:ensure": "tsx src/watchlist/ensure-weekly.ts",
     "backtest": "tsx src/backtest/backtest.ts",
+    "snapshot": "tsx src/backtest/snapshot.ts",
+    "paper:review": "tsx src/paper/review.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },

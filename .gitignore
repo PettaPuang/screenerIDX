@@ -10,8 +10,10 @@
 
 # generated runtime data
 /data/*.generated.json
+/data/backtest-snapshot.json
 /data/signal-state.json
 /data/run-log.jsonl
+/data/paper-trades.jsonl
 
 # misc
 .DS_Store

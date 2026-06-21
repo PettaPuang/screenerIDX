@@ -28,13 +28,15 @@ export function buildText(signals: Signal[], regimeWarn: string): string {
       [
         `*${index + 1}. ${signal.ticker}* ${
           signal.divergence ? "divergence " : ""
-        }(${signal.biasHTF})`,
+        }(${signal.biasHTF})${
+          signal.triggers.length ? ` [${signal.triggers.join("/")}]` : ""
+        }`,
         `Entry ${rp(signal.entry)} | Stop ${rp(signal.stop)} (-${signal.riskPct.toFixed(
           1,
         )}%) | TP ${rp(signal.target)} (+${signal.targetPct.toFixed(1)}%)`,
         `RR ${signal.rr.toFixed(2)} | RSI ${signal.rsi.toFixed(
           0,
-        )} | ~${signal.lots} lot`,
+        )} | CMF ${signal.cmf.toFixed(2)} | ~${signal.lots} lot`,
       ].join("\n"),
     )
     .join("\n\n");

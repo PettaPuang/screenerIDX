@@ -35,6 +35,9 @@ export interface Signal {
   nearestSupport: number;
   nearestResistance: number;
   biasHTF: string;
+  triggers: string[];
+  cmf: number;
+  volRatio: number;
 }
 
 export interface WeeklyCandidate {

@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
 import universe from "../universe/idx.json" with { type: "json" };
 import { CONFIG as C } from "../config.js";
 import { fetchDaily } from "../providers/yahoo.js";
@@ -12,6 +15,8 @@ interface TradeResult {
   exitDate: string;
   r: number;
   holdDays: number;
+  triggers: string[];
+  cmf: number;
 }
 
 /**
@@ -55,7 +60,14 @@ function countUpTo(times: number[], cutoff: number): number {
  * stop dan target sekaligus, lalu kurangi biaya roundtrip dalam satuan R.
  */
 function resolveTrade(
-  signal: { ticker: string; entry: number; stop: number; target: number },
+  signal: {
+    ticker: string;
+    entry: number;
+    stop: number;
+    target: number;
+    triggers: string[];
+    cmf: number;
+  },
   entryIndex: number,
   candles: Candle[],
 ): TradeResult | null {
@@ -106,6 +118,8 @@ function resolveTrade(
       exitDate: candle.date,
       r,
       holdDays: i - entryIndex,
+      triggers: signal.triggers,
+      cmf: signal.cmf,
     };
   }
 
@@ -124,6 +138,63 @@ function maxDrawdown(equityCurve: number[]): number {
   return drawdown;
 }
 
+function summarize(subset: TradeResult[]): {
+  trades: number;
+  winRate: string;
+  expectancyR: string;
+  totalR: string;
+  maxDrawdownR: string;
+  perTrigger: Record<string, { trades: number; winRate: string; expectancyR: string }>;
+} {
+  if (!subset.length) {
+    return {
+      trades: 0,
+      winRate: "0%",
+      expectancyR: "0.00",
+      totalR: "0.00",
+      maxDrawdownR: "0.00",
+      perTrigger: {},
+    };
+  }
+
+  const wins = subset.filter((trade) => trade.r > 0).length;
+  const sumR = subset.reduce((sum, trade) => sum + trade.r, 0);
+  const equityCurve = subset.reduce<number[]>((curve, trade) => {
+    const previous = curve.at(-1) ?? 0;
+    curve.push(previous + trade.r);
+    return curve;
+  }, []);
+  const perTrigger = new Map<string, { trades: number; wins: number; sumR: number }>();
+
+  for (const trade of subset) {
+    for (const trigger of trade.triggers) {
+      const summary = perTrigger.get(trigger) ?? { trades: 0, wins: 0, sumR: 0 };
+      summary.trades += 1;
+      summary.wins += trade.r > 0 ? 1 : 0;
+      summary.sumR += trade.r;
+      perTrigger.set(trigger, summary);
+    }
+  }
+
+  return {
+    trades: subset.length,
+    winRate: `${((wins / subset.length) * 100).toFixed(1)}%`,
+    expectancyR: (sumR / subset.length).toFixed(2),
+    totalR: sumR.toFixed(2),
+    maxDrawdownR: maxDrawdown(equityCurve).toFixed(2),
+    perTrigger: Object.fromEntries(
+      [...perTrigger.entries()].map(([trigger, summary]) => [
+        trigger,
+        {
+          trades: summary.trades,
+          winRate: `${((summary.wins / summary.trades) * 100).toFixed(1)}%`,
+          expectancyR: (summary.sumR / summary.trades).toFixed(2),
+        },
+      ]),
+    ),
+  };
+}
+
 interface Series {
   ticker: string;
   candles: Candle[];
@@ -131,6 +202,48 @@ interface Series {
 }
 
 async function loadUniverse(): Promise<Series[]> {
+  const snapshotPath = resolve(process.cwd(), C.backtest.snapshotPath);
+
+  try {
+    const raw = await readFile(snapshotPath, "utf8");
+    const data = JSON.parse(raw) as {
+      generatedAt?: unknown;
+      range?: unknown;
+      universeCount?: unknown;
+      tickers?: unknown;
+    };
+
+    if (
+      typeof data.range !== "string" ||
+      typeof data.tickers !== "object" ||
+      data.tickers === null ||
+      Array.isArray(data.tickers)
+    ) {
+      throw new Error("invalid snapshot shape");
+    }
+
+    const series: Series[] = [];
+
+    for (const [ticker, candles] of Object.entries(
+      data.tickers as Record<string, Candle[]>,
+    )) {
+      if (Array.isArray(candles) && candles.length) {
+        series.push({
+          ticker,
+          candles,
+          times: candles.map((candle) => candle.t),
+        });
+      }
+    }
+
+    console.log("backtest data source=snapshot");
+    return series;
+  } catch {
+    // fall through to live fetch
+  }
+
+  console.log("backtest data source=live");
+
   const series: Series[] = [];
 
   for (const ticker of universe as string[]) {
@@ -260,6 +373,34 @@ async function backtest(): Promise<void> {
     }
   }
 
+  const perTrigger = new Map<string, { trades: number; wins: number; sumR: number }>();
+
+  for (const trade of trades) {
+    for (const trigger of trade.triggers) {
+      const summary = perTrigger.get(trigger) ?? { trades: 0, wins: 0, sumR: 0 };
+      summary.trades += 1;
+      summary.wins += trade.r > 0 ? 1 : 0;
+      summary.sumR += trade.r;
+      perTrigger.set(trigger, summary);
+    }
+  }
+
+  const byFlow = (predicate: (trade: TradeResult) => boolean) => {
+    const subset = trades.filter(predicate);
+
+    if (!subset.length) {
+      return { trades: 0, winRate: "0%", expectancyR: "0.00" };
+    }
+
+    const subWins = subset.filter((trade) => trade.r > 0).length;
+    const subSumR = subset.reduce((sum, trade) => sum + trade.r, 0);
+    return {
+      trades: subset.length,
+      winRate: `${((subWins / subset.length) * 100).toFixed(1)}%`,
+      expectancyR: (subSumR / subset.length).toFixed(2),
+    };
+  };
+
   const wins = trades.filter((trade) => trade.r > 0).length;
   const losses = trades.filter((trade) => trade.r <= 0).length;
   const sumR = trades.reduce((sum, trade) => sum + trade.r, 0);
@@ -273,7 +414,14 @@ async function backtest(): Promise<void> {
   }, []);
   const tradeCount = trades.length;
 
+  const splitIndex = Math.floor(allDates.length * C.backtest.oosSplitFraction);
+  const splitT = allDates[splitIndex];
+  const splitDate = splitT != null ? new Date(splitT).toISOString().slice(0, 10) : null;
+  const inSampleTrades = splitDate ? trades.filter((t) => t.entryDate < splitDate) : trades;
+  const outOfSampleTrades = splitDate ? trades.filter((t) => t.entryDate >= splitDate) : [];
+
   console.log({
+    mode: C.strategy.mode,
     universe: series.length,
     weeksProcessed,
     avgWeeklyWatchlist: weeksProcessed
@@ -292,6 +440,20 @@ async function backtest(): Promise<void> {
     totalR: sumR.toFixed(2),
     maxDrawdownR: maxDrawdown(equityCurve).toFixed(2),
     costPct: C.backtest.costPct,
+    flowSplit: {
+      accumulation: byFlow((trade) => trade.cmf > 0),
+      distribution: byFlow((trade) => trade.cmf <= 0),
+    },
+    perTrigger: Object.fromEntries(
+      [...perTrigger.entries()].map(([trigger, summary]) => [
+        trigger,
+        {
+          trades: summary.trades,
+          winRate: `${((summary.wins / summary.trades) * 100).toFixed(1)}%`,
+          expectancyR: (summary.sumR / summary.trades).toFixed(2),
+        },
+      ]),
+    ),
     topTickers: [...perTicker.entries()]
       .map(([ticker, summary]) => ({
         ticker,
@@ -300,6 +462,9 @@ async function backtest(): Promise<void> {
       }))
       .sort((a, b) => b.trades - a.trades)
       .slice(0, 10),
+    splitDate,
+    inSample: summarize(inSampleTrades),
+    outOfSample: summarize(outOfSampleTrades),
   });
 }
 

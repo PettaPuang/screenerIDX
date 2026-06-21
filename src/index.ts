@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { CONFIG as C } from "./config.js";
@@ -58,6 +58,64 @@ async function appendRunLog(entry: Record<string, unknown>): Promise<void> {
     await appendFile(path, `${JSON.stringify(entry)}\n`, "utf8");
   } catch (error) {
     console.error("run_log_failed", (error as Error).message);
+  }
+}
+
+async function appendPaperTrades(signals: Signal[]): Promise<void> {
+  try {
+    const path = resolve(process.cwd(), C.paperTradesPath);
+    const openTickers = new Set<string>();
+
+    try {
+      const existing = await readFile(path, "utf8");
+
+      for (const line of existing.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+
+        const record = JSON.parse(line) as { ticker?: string; status?: string };
+
+        if (record.status === "open" && record.ticker) {
+          openTickers.add(record.ticker);
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    const signalDate = new Date().toISOString().slice(0, 10);
+    const lines: string[] = [];
+
+    for (const signal of signals) {
+      if (openTickers.has(signal.ticker)) {
+        continue;
+      }
+
+      lines.push(
+        `${JSON.stringify({
+          signalDate,
+          ticker: signal.ticker,
+          entry: signal.entry,
+          stop: signal.stop,
+          target: signal.target,
+          rr: signal.rr,
+          triggers: signal.triggers,
+          status: "open",
+        })}\n`,
+      );
+    }
+
+    if (!lines.length) {
+      return;
+    }
+
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, lines.join(""), "utf8");
+  } catch (error) {
+    console.error("paper_ledger_failed", (error as Error).message);
   }
 }
 
@@ -139,6 +197,7 @@ async function main(): Promise<void> {
     sent: top.length,
     tickers: top.map((signal) => signal.ticker),
   });
+  await appendPaperTrades(top);
 
   console.log(
     `done: ${top.length} sinyal terkirim (cooldown suppressed=${suppressed}, stale skip=${staleSkipped})`,
