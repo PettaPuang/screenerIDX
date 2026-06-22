@@ -41,6 +41,22 @@ export interface Signal {
   pivots: Pivots | null;
 }
 
+export interface TickerScan {
+  ticker: string;
+  price: number;
+  rsi: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  nearestSupport: number | null;
+  nearestResistance: number | null;
+  distToSupportPct: number | null;
+  distToResistancePct: number | null;
+  swingSupports: number[];
+  swingResistances: number[];
+  rejectReason: string | null;
+  hasSignal: boolean;
+}
+
 export interface WeeklyCandidate {
   ticker: string;
   price: number;

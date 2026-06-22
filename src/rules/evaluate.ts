@@ -9,7 +9,7 @@ import {
 import { classicPivots } from "../engine/pivots.js";
 import { resample } from "../engine/resample.js";
 import { clusterLevels, detectSwings } from "../engine/swings.js";
-import type { Candle, Signal } from "../engine/types.js";
+import type { Candle, Signal, TickerScan } from "../engine/types.js";
 
 function previousCompleted(candles: Candle[]): Candle | undefined {
   return candles.length >= 2 ? candles.at(-2) : candles.at(-1);
@@ -122,6 +122,21 @@ export function evaluateWithReasons(
     return { ticker, signal: null, rejectReason: "liquidity" };
   }
 
+  // Hitung pullback reference sebelum trigger block agar tersedia
+  // untuk RR calculation di pullback mode.
+  const pullbackSlice = candles.slice(-C.strategy.pullbackLookback);
+  const pullbackRecentHigh = Math.max(...pullbackSlice.map((c) => c.high));
+  // pullbackLow = low minimum SEJAK hari high terjadi (bukan seluruh window).
+  // Ini mencegah stop mengacu ke dip lama yang jauh dari harga sekarang.
+  // findLastIndex polyfill (tsconfig target mungkin belum es2023)
+  let highDayIdx = -1;
+  for (let i = pullbackSlice.length - 1; i >= 0; i--) {
+    const c = pullbackSlice[i];
+    if (c && c.high === pullbackRecentHigh) { highDayIdx = i; break; }
+  }
+  const pullbackPeriod = highDayIdx >= 0 ? pullbackSlice.slice(highDayIdx) : pullbackSlice;
+  const pullbackLow = Math.min(...pullbackPeriod.map((c) => c.low));
+
   const distSup = ((price - nearestSupport) / price) * 100;
   const triggers: string[] = [];
 
@@ -153,9 +168,7 @@ export function evaluateWithReasons(
     }
 
     if (enabled.pullbackPct) {
-      const lookback = candles.slice(-C.strategy.pullbackLookback);
-      const recentHigh = Math.max(...lookback.map((candle) => candle.high));
-      const pullback = ((recentHigh - price) / recentHigh) * 100;
+      const pullback = ((pullbackRecentHigh - price) / pullbackRecentHigh) * 100;
 
       if (
         pullback >= C.strategy.pullbackMinPct &&
@@ -210,8 +223,24 @@ export function evaluateWithReasons(
   }
 
   const entry = price;
-  const stop = nearestSupport * (1 - C.stopBufferPct / 100);
-  const rawTpPct = ((nearestResistance - price) / price) * 100;
+
+  // Pullback mode: stop di bawah low pullback itu sendiri (tight stop),
+  // target = pre-pullback high (titik asal sebelum koreksi dimulai).
+  // Reversal mode: stop di bawah structural support, target = resistance terdekat.
+  const stop =
+    C.strategy.mode === "pullback"
+      ? pullbackLow * (1 - C.stopBufferPct / 100)
+      : nearestSupport * (1 - C.stopBufferPct / 100);
+
+  const rawTpPct =
+    C.strategy.mode === "pullback"
+      ? ((pullbackRecentHigh - price) / price) * 100
+      : ((nearestResistance - price) / price) * 100;
+
+  if (entry <= stop || !Number.isFinite(stop) || stop <= 0) {
+    return { ticker, signal: null, rejectReason: "rr" };
+  }
+
   const targetPct = Math.min(rawTpPct, C.maxTpPct);
   const target = price * (1 + targetPct / 100);
   const rr = (target - entry) / (entry - stop);
@@ -274,4 +303,100 @@ export function evaluateWithReasons(
 
 export function evaluate(ticker: string, candles: Candle[]): Signal | null {
   return evaluateWithReasons(ticker, candles).signal;
+}
+
+/**
+ * Scan ringan: hitung S/R + RSI + SMA tanpa menjalankan gates.
+ * Selalu mengembalikan data meski tidak ada sinyal — untuk laporan harian.
+ */
+export function quickScan(
+  ticker: string,
+  candles: Candle[],
+  rejectReason: string | null = null,
+  hasSignal = false,
+): TickerScan {
+  const empty: TickerScan = {
+    ticker,
+    price: 0,
+    rsi: null,
+    sma20: null,
+    sma50: null,
+    nearestSupport: null,
+    nearestResistance: null,
+    distToSupportPct: null,
+    distToResistancePct: null,
+    swingSupports: [],
+    swingResistances: [],
+    rejectReason,
+    hasSignal,
+  };
+
+  if (candles.length < 20) return empty;
+
+  const last = candles.at(-1);
+  if (!last) return empty;
+
+  const price = last.close;
+  const closes = candles.map((c) => c.close);
+  const rsiArr = rsiSeries(closes, C.rsiPeriod);
+  const rsiVal = rsiArr.at(-1);
+  const rsi = rsiVal != null && Number.isFinite(rsiVal) ? rsiVal : null;
+  const s20 = sma(closes, 20);
+  const s50 = sma(closes, 50);
+
+  const weekly = resample(candles, "W");
+  const pD = classicPivots(previousCompleted(candles));
+  const pW = classicPivots(previousCompleted(weekly));
+  const zones = clusterLevels(detectSwings(candles, C.swingK), C.swingTolPct);
+  const zonePrices = zones.map((z) => z.price);
+
+  const supports = [
+    ...zonePrices,
+    pD?.S1,
+    pD?.S2,
+    pW?.S1,
+    pW?.S2,
+  ].filter((x): x is number => x != null && x < price);
+
+  const resistances = [
+    ...zonePrices,
+    pD?.R1,
+    pD?.R2,
+    pW?.R1,
+  ].filter((x): x is number => x != null && x > price);
+
+  const nearestSupport = supports.length ? Math.max(...supports) : null;
+  const nearestResistance = resistances.length ? Math.min(...resistances) : null;
+
+  const swingSupports = zones
+    .filter((z) => z.price < price)
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 3)
+    .map((z) => z.price);
+
+  const swingResistances = zones
+    .filter((z) => z.price > price)
+    .sort((a, b) => a.price - b.price)
+    .slice(0, 3)
+    .map((z) => z.price);
+
+  return {
+    ticker,
+    price,
+    rsi,
+    sma20: s20,
+    sma50: s50,
+    nearestSupport,
+    nearestResistance,
+    distToSupportPct:
+      nearestSupport != null ? ((price - nearestSupport) / price) * 100 : null,
+    distToResistancePct:
+      nearestResistance != null
+        ? ((nearestResistance - price) / price) * 100
+        : null,
+    swingSupports,
+    swingResistances,
+    rejectReason,
+    hasSignal,
+  };
 }

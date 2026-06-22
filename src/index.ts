@@ -3,9 +3,9 @@ import { dirname, resolve } from "node:path";
 
 import { CONFIG as C } from "./config.js";
 import { fetchDaily } from "./providers/yahoo.js";
-import { evaluate } from "./rules/evaluate.js";
+import { evaluateWithReasons, quickScan } from "./rules/evaluate.js";
 import { notifyAll } from "./notify/index.js";
-import { buildHtml, buildText, buildWeeklyHtml, buildWeeklyText } from "./report/format.js";
+import { buildHtml, buildScanHtml, buildScanText, buildText, buildWeeklyHtml, buildWeeklyText } from "./report/format.js";
 import { loadDailyWatchlist } from "./watchlist/load.js";
 import {
   isOnCooldown,
@@ -13,7 +13,7 @@ import {
   saveSignalState,
 } from "./state/signals.js";
 import { sleep } from "./utils/time.js";
-import type { Signal } from "./engine/types.js";
+import type { Signal, TickerScan } from "./engine/types.js";
 
 interface MarketContext {
   warn: string;
@@ -121,6 +121,7 @@ async function appendPaperTrades(signals: Signal[]): Promise<void> {
 
 async function main(): Promise<void> {
   const signals: Signal[] = [];
+  const scans: TickerScan[] = [];
   const watchlist = await loadDailyWatchlist();
   const market = await marketContext();
 
@@ -146,11 +147,19 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const signal = evaluate(ticker, candles);
+      const evaluation = evaluateWithReasons(ticker, candles);
+      const scan = quickScan(
+        ticker,
+        candles,
+        evaluation.rejectReason,
+        evaluation.signal != null,
+      );
 
-      if (signal) {
-        signals.push(signal);
+      if (evaluation.signal) {
+        signals.push(evaluation.signal);
       }
+
+      scans.push(scan);
     } catch (error) {
       console.error(`skip ${ticker}:`, (error as Error).message);
     }
@@ -177,10 +186,12 @@ async function main(): Promise<void> {
   const warn = notes.join("\n");
   const subject = `Screener IDX - ${top.length} sinyal`;
 
-  const text = `${buildWeeklyText(watchlist.candidates)}\n\n${buildText(top, warn)}`;
-  const html = `${buildWeeklyHtml(watchlist.candidates)}${buildHtml(top, warn)}`;
+  const weeklyText = buildWeeklyText(watchlist.candidates);
+  const scanText = buildScanText(scans);
+  const dailyText = `${scanText}\n\n${buildText(top, warn)}`;
+  const html = `${buildWeeklyHtml(watchlist.candidates)}${buildScanHtml(scans)}${buildHtml(top, warn)}`;
 
-  await notifyAll(text, html, subject);
+  await notifyAll(weeklyText, dailyText, html, subject);
 
   const today = new Date().toISOString();
   for (const signal of top) {

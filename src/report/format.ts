@@ -1,4 +1,4 @@
-import type { Signal, WeeklyCandidate } from "../engine/types.js";
+import type { Signal, TickerScan, WeeklyCandidate } from "../engine/types.js";
 
 const rupiah = new Intl.NumberFormat("id-ID", {
   maximumFractionDigits: 0,
@@ -6,6 +6,83 @@ const rupiah = new Intl.NumberFormat("id-ID", {
 
 function rp(n: number): string {
   return rupiah.format(n);
+}
+
+export function buildScanText(scans: TickerScan[]): string {
+  if (!scans.length) return "";
+
+  const rows = scans
+    .map((s) => {
+      const status = s.hasSignal ? "✅" : "⬜";
+      const price = rp(s.price);
+      const rsiStr = s.rsi != null ? `RSI ${s.rsi.toFixed(0)}` : "RSI n/a";
+      const sup =
+        s.nearestSupport != null
+          ? `S ${rp(s.nearestSupport)} (${s.distToSupportPct!.toFixed(1)}%↓)`
+          : "S -";
+      const res =
+        s.nearestResistance != null
+          ? `R ${rp(s.nearestResistance)} (${s.distToResistancePct!.toFixed(1)}%↑)`
+          : "R -";
+      const swingS = s.swingSupports.length
+        ? `sS: ${s.swingSupports.map(rp).join("/")}`
+        : "";
+      const swingR = s.swingResistances.length
+        ? `sR: ${s.swingResistances.map(rp).join("/")}`
+        : "";
+      const reason =
+        !s.hasSignal && s.rejectReason ? ` [${s.rejectReason}]` : "";
+      const swingLine =
+        swingS || swingR ? `\n   ${[swingS, swingR].filter(Boolean).join(" | ")}` : "";
+
+      return `${status} *${s.ticker}* ${price}  ${rsiStr}  ${sup}  ${res}${reason}${swingLine}`;
+    })
+    .join("\n");
+
+  return `*Data Ticker Hari Ini* (${scans.length} saham)\n${rows}`;
+}
+
+export function buildScanHtml(scans: TickerScan[]): string {
+  if (!scans.length) return "";
+
+  const rows = scans
+    .map((s) => {
+      const status = s.hasSignal ? "✅" : "";
+      const sup =
+        s.nearestSupport != null
+          ? `${rp(s.nearestSupport)} <small>(${s.distToSupportPct!.toFixed(1)}%↓)</small>`
+          : "-";
+      const res =
+        s.nearestResistance != null
+          ? `${rp(s.nearestResistance)} <small>(${s.distToResistancePct!.toFixed(1)}%↑)</small>`
+          : "-";
+      const swingS = s.swingSupports.map(rp).join(" / ") || "-";
+      const swingR = s.swingResistances.map(rp).join(" / ") || "-";
+      const reason = !s.hasSignal && s.rejectReason ? `<br><small style="color:#888">${s.rejectReason}</small>` : "";
+
+      return `<tr>
+  <td>${status}</td>
+  <td><b>${s.ticker}</b>${reason}</td>
+  <td style="text-align:right">${rp(s.price)}</td>
+  <td style="text-align:right">${s.rsi != null ? s.rsi.toFixed(0) : "-"}</td>
+  <td style="text-align:right">${sup}</td>
+  <td style="text-align:right">${res}</td>
+  <td><small>${swingS}</small></td>
+  <td><small>${swingR}</small></td>
+</tr>`;
+    })
+    .join("");
+
+  return `<h3>Data Ticker Hari Ini (${scans.length} saham)</h3>
+<table border="1" cellpadding="5" style="border-collapse:collapse;font-size:13px">
+  <tr style="background:#f0f0f0">
+    <th></th><th>Ticker</th><th>Harga</th><th>RSI</th>
+    <th>Support Terdekat</th><th>Resistance Terdekat</th>
+    <th>Swing S</th><th>Swing R</th>
+  </tr>
+  ${rows}
+</table>
+`;
 }
 
 export function buildWeeklyText(candidates: WeeklyCandidate[]): string {
