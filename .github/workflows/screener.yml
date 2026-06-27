@@ -2,8 +2,12 @@ name: SR Screener
 
 on:
   schedule:
-    - cron: "30 0 * * 1"
-    - cron: "50 1 * * 1-5"
+    # Minggu 22:00 WITA — refresh watchlist mingguan (paksa rebuild) + sinyal Senin
+    # (data close Jumat). Sen–Kam 22:00 WITA — sinyal harian untuk besok.
+    - cron: "0 22 * * 0"
+      timezone: "Asia/Makassar"
+    - cron: "0 22 * * 1-4"
+      timezone: "Asia/Makassar"
   workflow_dispatch: {}
 
 jobs:
@@ -25,15 +29,19 @@ jobs:
         with:
           path: data/watchlist.generated.json
           key: watchlist-${{ env.WATCHLIST_WEEK }}
-      - run: npm run weekly:ensure
+      - name: Rebuild weekly watchlist (Minggu)
+        if: github.event.schedule == '0 22 * * 0'
+        run: npm run weekly
+      - name: Ensure weekly watchlist (Sen–Kam)
+        if: github.event.schedule != '0 22 * * 0'
+        run: npm run weekly:ensure
       - name: Save weekly watchlist
-        if: steps.watchlist-cache.outputs.cache-hit != 'true'
+        if: steps.watchlist-cache.outputs.cache-hit != 'true' || github.event.schedule == '0 22 * * 0'
         uses: actions/cache/save@v5
         with:
           path: data/watchlist.generated.json
           key: watchlist-${{ env.WATCHLIST_WEEK }}
       - name: Restore signal state (cooldown)
-        if: github.event.schedule != '30 0 * * 1'
         uses: actions/cache/restore@v5
         with:
           path: data/signal-state.json
@@ -41,7 +49,6 @@ jobs:
           restore-keys: |
             signal-state-
       - run: npm start
-        if: github.event.schedule != '30 0 * * 1'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -49,9 +56,7 @@ jobs:
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
       - name: Save signal state (cooldown)
-        if: github.event.schedule != '30 0 * * 1'
         uses: actions/cache/save@v5
         with:
           path: data/signal-state.json
           key: signal-state-${{ github.run_id }}
-
