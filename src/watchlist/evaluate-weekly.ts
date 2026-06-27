@@ -40,6 +40,7 @@ function previousCompleted(candles: Candle[]): Candle | undefined {
 export function evaluateWeeklyCandidate(
   ticker: string,
   candles: Candle[],
+  name: string | null = null,
 ): WeeklyEvaluation {
   if (candles.length < C.weekly.minHistoryDays) {
     return { ticker, candidate: null, rejectReason: "data_insufficient" };
@@ -133,6 +134,7 @@ export function evaluateWeeklyCandidate(
     rejectReason: null,
     candidate: {
       ticker,
+      name,
       price,
       score,
       adv20,

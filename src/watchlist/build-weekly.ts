@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import universe from "../universe/idx.json" with { type: "json" };
 import { CONFIG as C } from "../config.js";
-import { fetchDaily } from "../providers/yahoo.js";
+import { fetchDailyWithMeta } from "../providers/yahoo.js";
 import { sleep } from "../utils/time.js";
 import { evaluateWeeklyCandidate } from "./evaluate-weekly.js";
 import type { WeeklyCandidate } from "../engine/types.js";
@@ -24,8 +24,8 @@ export async function buildWeeklyWatchlist(): Promise<GeneratedWatchlist> {
 
   for (const ticker of universe as string[]) {
     try {
-      const candles = await fetchDaily(ticker, C.rangeYears);
-      const result = evaluateWeeklyCandidate(ticker, candles);
+      const { candles, displayName } = await fetchDailyWithMeta(ticker, C.rangeYears);
+      const result = evaluateWeeklyCandidate(ticker, candles, displayName);
 
       if (result.candidate) {
         candidates.push(result.candidate);

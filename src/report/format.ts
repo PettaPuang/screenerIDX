@@ -8,38 +8,39 @@ function rp(n: number): string {
   return rupiah.format(n);
 }
 
+function formatPivotLine(levels: Array<[string, number]>): string {
+  return levels.map(([label, value]) => `${label} ${rp(value)}`).join(" | ");
+}
+
 export function buildScanText(scans: TickerScan[]): string {
   if (!scans.length) return "";
 
   const rows = scans
-    .map((s) => {
-      const status = s.hasSignal ? "✅" : "⬜";
-      const price = rp(s.price);
-      const rsiStr = s.rsi != null ? `RSI ${s.rsi.toFixed(0)}` : "RSI n/a";
-      const sup =
-        s.nearestSupport != null
-          ? `S ${rp(s.nearestSupport)} (${s.distToSupportPct!.toFixed(1)}%↓)`
-          : "S -";
-      const res =
-        s.nearestResistance != null
-          ? `R ${rp(s.nearestResistance)} (${s.distToResistancePct!.toFixed(1)}%↑)`
-          : "R -";
-      const swingS = s.swingSupports.length
-        ? `sS: ${s.swingSupports.map(rp).join("/")}`
-        : "";
-      const swingR = s.swingResistances.length
-        ? `sR: ${s.swingResistances.map(rp).join("/")}`
-        : "";
-      const reason =
-        !s.hasSignal && s.rejectReason ? ` [${s.rejectReason}]` : "";
-      const swingLine =
-        swingS || swingR ? `\n   ${[swingS, swingR].filter(Boolean).join(" | ")}` : "";
+    .map((scan) => {
+      const head = scan.rejectReason
+        ? `${scan.ticker}, ${scan.rejectReason}`
+        : scan.ticker;
+      const lines = [head];
 
-      return `${status} *${s.ticker}* ${price}  ${rsiStr}  ${sup}  ${res}${reason}${swingLine}`;
+      if (scan.pivots) {
+        const p = scan.pivots;
+        lines.push(formatPivotLine([
+          ["R1", p.R1],
+          ["R2", p.R2],
+          ["R3", p.R3],
+        ]));
+        lines.push(formatPivotLine([
+          ["S1", p.S1],
+          ["S2", p.S2],
+          ["S3", p.S3],
+        ]));
+      }
+
+      return lines.join("\n");
     })
-    .join("\n");
+    .join("\n\n");
 
-  return `*Data Ticker Hari Ini* (${scans.length} saham)\n${rows}`;
+  return `*Data Ticker Hari Ini* (${scans.length} saham)\n\n${rows}`;
 }
 
 export function buildScanHtml(scans: TickerScan[]): string {
@@ -91,22 +92,11 @@ export function buildWeeklyText(candidates: WeeklyCandidate[]): string {
   }
 
   const rows = candidates
-    .map((candidate, index) => {
-      const head = `${index + 1}. *${candidate.ticker}* ${rp(candidate.price)} (${candidate.distanceToSupportPct.toFixed(
-        1,
-      )}% dr support | ATR ${candidate.atrPct.toFixed(1)}%)`;
-      const parts: string[] = [];
-
-      if (candidate.swingResistances?.length) {
-        parts.push(`R ${candidate.swingResistances.map(rp).join(" / ")}`);
-      }
-
-      if (candidate.swingSupports?.length) {
-        parts.push(`S ${candidate.swingSupports.map(rp).join(" / ")}`);
-      }
-
-      return parts.length ? `${head}\n   ${parts.join(" | ")}` : head;
-    })
+    .map((candidate) =>
+      candidate.name
+        ? `${candidate.ticker}, ${candidate.name}`
+        : candidate.ticker,
+    )
     .join("\n");
 
   return [`*Watchlist Minggu Ini* (${candidates.length} saham)`, rows].join("\n");

@@ -327,6 +327,7 @@ export function quickScan(
     distToResistancePct: null,
     swingSupports: [],
     swingResistances: [],
+    pivots: null,
     rejectReason,
     hasSignal,
   };
@@ -396,6 +397,7 @@ export function quickScan(
         : null,
     swingSupports,
     swingResistances,
+    pivots: pD,
     rejectReason,
     hasSignal,
   };

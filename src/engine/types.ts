@@ -53,12 +53,14 @@ export interface TickerScan {
   distToResistancePct: number | null;
   swingSupports: number[];
   swingResistances: number[];
+  pivots: Pivots | null;
   rejectReason: string | null;
   hasSignal: boolean;
 }
 
 export interface WeeklyCandidate {
   ticker: string;
+  name?: string | null;
   price: number;
   score: number;
   adv20: number;

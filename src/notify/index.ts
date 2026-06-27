@@ -33,13 +33,12 @@ async function sendTelegramSequential(texts: string[]): Promise<void> {
 }
 
 export async function notifyAll(
-  weeklyText: string,
   dailyText: string,
   html: string,
   subject: string,
 ): Promise<void> {
   const results = await Promise.allSettled([
-    sendTelegramSequential([weeklyText, dailyText]),
+    sendTelegramSequential([dailyText]),
     sendEmail(subject, html),
   ]);
 

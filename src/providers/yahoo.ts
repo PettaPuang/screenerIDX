@@ -37,11 +37,13 @@ async function fetchWithRetry(url: string): Promise<Response> {
   throw lastError;
 }
 
-interface YahooChartResponse {
-  chart?: {
-    result?: Array<{
-      timestamp?: number[];
-      indicators?: {
+interface YahooChartResult {
+  meta?: {
+    shortName?: string;
+    longName?: string;
+  };
+  timestamp?: number[];
+  indicators?: {
         quote?: Array<{
           open?: Array<number | null>;
           high?: Array<number | null>;
@@ -53,8 +55,24 @@ interface YahooChartResponse {
           adjclose?: Array<number | null>;
         }>;
       };
-    }>;
+}
+
+interface YahooChartResponse {
+  chart?: {
+    result?: YahooChartResult[];
   };
+}
+
+export function chartDisplayName(meta?: YahooChartResult["meta"]): string | null {
+  const raw = meta?.shortName ?? meta?.longName;
+  if (!raw) return null;
+
+  const cleaned = raw
+    .replace(/^PT\s+/i, "")
+    .replace(/\s+Tbk\.?$/i, "")
+    .trim();
+
+  return cleaned || null;
 }
 
 function toYahooSymbol(ticker: string): string {
@@ -67,21 +85,8 @@ function toYahooSymbol(ticker: string): string {
   return `${normalized}.JK`;
 }
 
-export async function fetchDaily(
-  ticker: string,
-  range = "2y",
-  adjusted = true,
-): Promise<Candle[]> {
-  const sym = toYahooSymbol(ticker);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-    sym,
-  )}?interval=1d&range=${encodeURIComponent(range)}`;
-
-  const res = await fetchWithRetry(url);
-  const body = (await res.json()) as YahooChartResponse;
-  const result = body.chart?.result?.[0];
-
-  if (!result?.timestamp?.length) {
+function parseChartCandles(result: YahooChartResult, adjusted: boolean): Candle[] {
+  if (!result.timestamp?.length) {
     throw new Error("provider_no_data");
   }
 
@@ -138,4 +143,46 @@ export async function fetchDaily(
 
   out.sort((a, b) => a.t - b.t);
   return out;
+}
+
+async function fetchChartResult(
+  ticker: string,
+  range: string,
+): Promise<YahooChartResult> {
+  const sym = toYahooSymbol(ticker);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    sym,
+  )}?interval=1d&range=${encodeURIComponent(range)}`;
+
+  const res = await fetchWithRetry(url);
+  const body = (await res.json()) as YahooChartResponse;
+  const result = body.chart?.result?.[0];
+
+  if (!result?.timestamp?.length) {
+    throw new Error("provider_no_data");
+  }
+
+  return result;
+}
+
+export async function fetchDaily(
+  ticker: string,
+  range = "2y",
+  adjusted = true,
+): Promise<Candle[]> {
+  const result = await fetchChartResult(ticker, range);
+  return parseChartCandles(result, adjusted);
+}
+
+export async function fetchDailyWithMeta(
+  ticker: string,
+  range = "2y",
+  adjusted = true,
+): Promise<{ candles: Candle[]; displayName: string | null }> {
+  const result = await fetchChartResult(ticker, range);
+
+  return {
+    candles: parseChartCandles(result, adjusted),
+    displayName: chartDisplayName(result.meta),
+  };
 }
