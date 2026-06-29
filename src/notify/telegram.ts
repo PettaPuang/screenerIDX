@@ -10,12 +10,14 @@ export async function sendTelegram(text: string): Promise<void> {
       body: JSON.stringify({
         chat_id: env.TELEGRAM_CHAT_ID,
         text,
-        parse_mode: "Markdown",
+        // Tanpa parse_mode: alasan reject memakai underscore (reversal_unconfirmed)
+        // yang memicu error 400 dari Telegram Markdown parser.
       }),
     },
   );
 
   if (!res.ok) {
-    throw new Error(`telegram_${res.status}`);
+    const body = await res.text();
+    throw new Error(`telegram_${res.status}: ${body}`);
   }
 }

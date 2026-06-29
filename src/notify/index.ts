@@ -37,14 +37,19 @@ export async function notifyAll(
   html: string,
   subject: string,
 ): Promise<void> {
-  const results = await Promise.allSettled([
+  const [telegramResult, emailResult] = await Promise.allSettled([
     sendTelegramSequential([dailyText]),
     sendEmail(subject, html),
   ]);
 
-  results.forEach((result, index) => {
-    if (result.status === "rejected") {
-      console.error(`notify_${index}_failed`, result.reason);
-    }
-  });
+  if (telegramResult.status === "fulfilled") {
+    console.log("telegram_sent");
+  } else {
+    console.error("telegram_failed", telegramResult.reason);
+    throw telegramResult.reason;
+  }
+
+  if (emailResult.status === "rejected") {
+    console.error("email_failed", emailResult.reason);
+  }
 }

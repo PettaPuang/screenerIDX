@@ -40,7 +40,7 @@ export function buildScanText(scans: TickerScan[]): string {
     })
     .join("\n\n");
 
-  return `*Data Ticker Hari Ini* (${scans.length} saham)\n\n${rows}`;
+  return `Data Ticker Hari Ini (${scans.length} saham)\n\n${rows}`;
 }
 
 export function buildScanHtml(scans: TickerScan[]): string {
@@ -148,7 +148,7 @@ export function buildText(signals: Signal[], regimeWarn: string): string {
   const rows = signals
     .map((signal, index) => {
       const lines = [
-        `*${index + 1}. ${signal.ticker}* ${
+        `${index + 1}. ${signal.ticker} ${
           signal.divergence ? "divergence " : ""
         }(${signal.biasHTF})${
           signal.triggers.length ? ` [${signal.triggers.join("/")}]` : ""
@@ -179,7 +179,7 @@ export function buildText(signals: Signal[], regimeWarn: string): string {
     "",
     rows,
     "",
-    "_Bukan nasihat keuangan. Verifikasi harga live dan konfirmasi entry._",
+    "Bukan nasihat keuangan. Verifikasi harga live dan konfirmasi entry.",
   ].join("\n");
 }
 
